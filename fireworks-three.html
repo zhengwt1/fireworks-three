@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Three.js 心型烟火</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #050817;
+      font-family: "Microsoft YaHei", Arial, sans-serif;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .caption {
+      position: fixed;
+      left: 50%;
+      bottom: 7vh;
+      transform: translateX(-50%);
+      color: rgba(255, 255, 255, 0.9);
+      text-align: center;
+      text-shadow: 0 2px 18px rgba(0, 0, 0, 0.75);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .caption h1 {
+      font-size: clamp(32px, 6vw, 72px);
+      letter-spacing: 0;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="caption">
+    <h1>心型烟火</h1>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script>
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x050817, 0.028);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 120);
+    camera.position.set(0, 2.8, 28);
+    camera.lookAt(0, 2, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x050817, 1);
+    document.body.appendChild(renderer.domElement);
+
+    const clock = new THREE.Clock();
+    const rockets = [];
+    const bursts = [];
+
+    const palette = [
+      new THREE.Color(0xffd166),
+      new THREE.Color(0xff4f81),
+      new THREE.Color(0x4df4ff),
+      new THREE.Color(0x78ff8f),
+      new THREE.Color(0xff9f43),
+      new THREE.Color(0xb48cff)
+    ];
+
+    function addStars() {
+      const count = 900;
+      const positions = new Float32Array(count * 3);
+      const colors = new Float32Array(count * 3);
+
+      for (let i = 0; i < count; i++) {
+        const radius = 42 + Math.random() * 34;
+        const theta = Math.random() * Math.PI * 2;
+        const y = -3 + Math.random() * 33;
+        positions[i * 3] = Math.cos(theta) * radius;
+        positions[i * 3 + 1] = y;
+        positions[i * 3 + 2] = Math.sin(theta) * radius - 12;
+
+        const glow = 0.55 + Math.random() * 0.45;
+        colors[i * 3] = glow;
+        colors[i * 3 + 1] = glow;
+        colors[i * 3 + 2] = glow;
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+      const material = new THREE.PointsMaterial({
+        size: 0.08,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: false
+      });
+
+      scene.add(new THREE.Points(geometry, material));
+    }
+
+    function addMoon() {
+      const moon = new THREE.Mesh(
+        new THREE.SphereGeometry(1.35, 40, 40),
+        new THREE.MeshBasicMaterial({ color: 0xfff2bd })
+      );
+      moon.position.set(12, 10, -18);
+      scene.add(moon);
+
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeGlowTexture(),
+        color: 0xffefbf,
+        transparent: true,
+        opacity: 0.34,
+        depthWrite: false
+      }));
+      glow.position.copy(moon.position);
+      glow.scale.set(8, 8, 1);
+      scene.add(glow);
+    }
+
+    function addGround() {
+      const geometry = new THREE.PlaneGeometry(80, 15, 1, 1);
+      const material = new THREE.MeshBasicMaterial({ color: 0x080a0f });
+      const ground = new THREE.Mesh(geometry, material);
+      ground.position.set(0, -8.8, -8);
+      ground.rotation.x = -0.18;
+      scene.add(ground);
+    }
+
+    function makeGlowTexture() {
+      const canvas = document.createElement("canvas");
+      canvas.width = 128;
+      canvas.height = 128;
+      const ctx = canvas.getContext("2d");
+      const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      gradient.addColorStop(0, "rgba(255,255,255,1)");
+      gradient.addColorStop(0.22, "rgba(255,255,255,0.8)");
+      gradient.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 128, 128);
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    const particleTexture = makeGlowTexture();
+
+    function createRocket(target, color, shape) {
+      const isSymbol = shape !== "sphere";
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([target.x, -7.6, target.z]), 3));
+
+      const material = new THREE.PointsMaterial({
+        map: particleTexture,
+        size: isSymbol ? 0.7 : 0.5,
+        color,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+
+      const point = new THREE.Points(geometry, material);
+      scene.add(point);
+
+      rockets.push({
+        point,
+        geometry,
+        material,
+        start: new THREE.Vector3(target.x, -7.6, target.z),
+        target,
+        color,
+        shape,
+        age: 0,
+        duration: isSymbol ? 1.7 : 1.15
+      });
+    }
+
+    function createBurst(origin, color, shape) {
+      const isSymbol = shape !== "sphere";
+      const count = shape === "heart" ? 320 : isSymbol ? 230 : 145;
+      const positions = new Float32Array(count * 3);
+      const velocities = [];
+      const colors = new Float32Array(count * 3);
+
+      for (let i = 0; i < count; i++) {
+        positions[i * 3] = origin.x;
+        positions[i * 3 + 1] = origin.y;
+        positions[i * 3 + 2] = origin.z;
+
+        const velocity = shapeVelocity(shape, i, count);
+        velocities.push(velocity);
+
+        const shade = color.clone().lerp(new THREE.Color(0xffffff), Math.random() * 0.28);
+        colors[i * 3] = shade.r;
+        colors[i * 3 + 1] = shade.g;
+        colors[i * 3 + 2] = shade.b;
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+      const material = new THREE.PointsMaterial({
+        map: particleTexture,
+        size: isSymbol ? 0.3 : 0.25,
+        vertexColors: true,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+
+      const points = new THREE.Points(geometry, material);
+      scene.add(points);
+
+      bursts.push({
+        points,
+        geometry,
+        material,
+        origin: origin.clone(),
+        velocities,
+        age: 0,
+        duration: isSymbol ? 3.2 : 2.5,
+        shape
+      });
+    }
+
+    function shapeVelocity(shape, index, count) {
+      if (shape === "heart") {
+        return heartVelocity(index, count);
+      }
+
+      if (shape === "z") {
+        return letterVelocity(index, count, "z");
+      }
+
+      if (shape === "h") {
+        return letterVelocity(index, count, "h");
+      }
+
+      return sphereVelocity();
+    }
+
+    function sphereVelocity() {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const speed = 4.4 + Math.random() * 4.8;
+      return new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta) * speed,
+        Math.cos(phi) * speed,
+        Math.sin(phi) * Math.sin(theta) * speed * 0.35
+      );
+    }
+
+    function heartVelocity(index, count) {
+      const t = (index / count) * Math.PI * 2;
+      const x = 16 * Math.pow(Math.sin(t), 3);
+      const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+      const jitter = 0.14;
+      return new THREE.Vector3(
+        (x / 16) * 7.5 + (Math.random() - 0.5) * jitter,
+        (y / 17) * 7.3 + (Math.random() - 0.5) * jitter,
+        (Math.random() - 0.5) * 1.4
+      );
+    }
+
+    function letterVelocity(index, count, letter) {
+      const progress = index / count;
+      const segment = Math.floor(progress * 3);
+      const t = (progress * 3) % 1;
+      const width = 5.6;
+      const height = 7.8;
+      let x = 0;
+      let y = 0;
+
+      if (letter === "z") {
+        if (segment === 0) {
+          x = -width / 2 + t * width;
+          y = height / 2;
+        } else if (segment === 1) {
+          x = width / 2 - t * width;
+          y = height / 2 - t * height;
+        } else {
+          x = -width / 2 + t * width;
+          y = -height / 2;
+        }
+      } else {
+        if (segment === 0) {
+          x = -width / 2;
+          y = height / 2 - t * height;
+        } else if (segment === 1) {
+          x = -width / 2 + t * width;
+          y = 0;
+        } else {
+          x = width / 2;
+          y = height / 2 - t * height;
+        }
+      }
+
+      return new THREE.Vector3(
+        x + (Math.random() - 0.5) * 0.28,
+        y + (Math.random() - 0.5) * 0.28,
+        (Math.random() - 0.5) * 1.1
+      );
+    }
+
+    function updateRockets(delta) {
+      for (let i = rockets.length - 1; i >= 0; i--) {
+        const rocket = rockets[i];
+        rocket.age += delta;
+        const progress = Math.min(rocket.age / rocket.duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const pos = rocket.start.clone().lerp(rocket.target, eased);
+
+        rocket.geometry.attributes.position.setXYZ(0, pos.x, pos.y, pos.z);
+        rocket.geometry.attributes.position.needsUpdate = true;
+        rocket.material.opacity = 1 - progress * 0.45;
+
+        if (progress >= 1) {
+          scene.remove(rocket.point);
+          rocket.geometry.dispose();
+          rocket.material.dispose();
+          createBurst(rocket.target, rocket.color, rocket.shape);
+          rockets.splice(i, 1);
+        }
+      }
+    }
+
+    function updateBursts(delta) {
+      for (let i = bursts.length - 1; i >= 0; i--) {
+        const burst = bursts[i];
+        burst.age += delta;
+        const progress = Math.min(burst.age / burst.duration, 1);
+        const positions = burst.geometry.attributes.position;
+        const isSymbol = burst.shape !== "sphere";
+        const gravity = isSymbol ? -0.32 : -1.35;
+
+        for (let j = 0; j < burst.velocities.length; j++) {
+          const v = burst.velocities[j];
+          const drag = isSymbol ? 1 - progress * 0.18 : 1 - progress * 0.36;
+          positions.setXYZ(
+            j,
+            burst.origin.x + v.x * progress * drag,
+            burst.origin.y + v.y * progress * drag + gravity * progress * progress * 5,
+            burst.origin.z + v.z * progress * drag
+          );
+        }
+
+        positions.needsUpdate = true;
+        burst.material.opacity = Math.max(0, 1 - Math.pow(progress, 1.6));
+        burst.material.size = isSymbol ? 0.34 + progress * 0.1 : 0.24 + progress * 0.06;
+
+        if (progress >= 1) {
+          scene.remove(burst.points);
+          burst.geometry.dispose();
+          burst.material.dispose();
+          bursts.splice(i, 1);
+        }
+      }
+    }
+
+    function randomFirework() {
+      const color = palette[Math.floor(Math.random() * palette.length)];
+      createRocket(new THREE.Vector3(
+        -13 + Math.random() * 26,
+        0.5 + Math.random() * 10,
+        -4 + Math.random() * 3
+      ), color, "sphere");
+    }
+
+    function heartFirework() {
+      createRocket(new THREE.Vector3(0, 5.1, -2.1), new THREE.Color(0xff4f81), "heart");
+    }
+
+    function loveLettersFirework() {
+      const baseY = 5 + Math.random() * 1.2;
+      const baseZ = -2.7 + Math.random() * 0.9;
+      createRocket(new THREE.Vector3(-7.4, baseY, baseZ), new THREE.Color(0xffd166), "z");
+      createRocket(new THREE.Vector3(0, baseY + 0.25, baseZ), new THREE.Color(0xff4f81), "heart");
+      createRocket(new THREE.Vector3(7.4, baseY, baseZ), new THREE.Color(0x4df4ff), "h");
+    }
+
+    addStars();
+    addMoon();
+    addGround();
+
+    loveLettersFirework();
+    let regularTimer = 0;
+    let heartTimer = 0;
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = Math.min(clock.getDelta(), 0.033);
+
+      regularTimer += delta;
+      heartTimer += delta;
+
+      if (regularTimer > 0.34) {
+        randomFirework();
+        regularTimer = 0;
+      }
+
+      if (heartTimer >= 3) {
+        loveLettersFirework();
+        heartTimer = 0;
+      }
+
+      updateRockets(delta);
+      updateBursts(delta);
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    });
+  </script>
+</body>
+</html>
